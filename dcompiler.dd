@@ -829,6 +829,309 @@ $(H2 $(LEGACY_LNAME2 interface_files, interface-files, D Interface Files))
     of the build process.
     )
 
+$(H2 $(LNAME2 gen_cpp_header_files, Generate C++ Header Files))
+
+    $(P $(B dmd) can generate a $(B C++ header) file out of a list of list
+    of D source files by using the $(SWLINK -HC) compiler switch.
+    )
+
+    $(P The simplest form of the CLI switch is `dmd -HC a.d b.d`
+    This will visit the ASTs of the modules $(B a) and $(B b) and output a
+    single header file at $(B stdout).
+    )
+
+    $(P Using the $(SWLINK -HCf)`=<file-name>` switch, the above result will
+    be written in specified file name. Using $(SWLINK -HCd)`=<path>` will
+    write the $(B file-name) in the specified $(B path).
+    )
+
+    $(P $(B dmd) will traverse the ASTs of the list of modules that it was
+    provided and it will search for `extern (C)` and `extern (C++)`
+    definitions, as detailed below.
+    )
+
+$(H3 $(LNAME2 gen_cpp_header_files_var_decl, Variable declarations))
+
+    $(P Basic type variable definitions and user defined type declarations
+    that are not marked as `extern (C)` or as `extern (C++)` will be ignored.
+    Otherwise, they will follow they will follow the following style.
+    )
+
+    $(P The below D module)
+
+    ```D
+    int x = 42;
+    extern int y;
+    extern (C) int z;
+    extern (C++) __gshared int t;
+    extern (C) struct S;
+    extern (C++) struct S2;
+    extern (C) class C;
+    extern (C++) class C2;
+    extern (C) union U;
+    extern (C++) union U2;
+    ```
+
+    $(P will generate the following declarations in the C++ header file)
+    ```C++
+    // ignoring variable dtoh_VarDeclaration.x because of linkage
+    // ignoring variable dtoh_VarDeclaration.y because of linkage
+    extern "C" _d_int z;
+    extern _d_int t;
+    struct S;
+    struct S2;
+    // ignoring non-cpp class C
+    class C2;
+    union U;
+    union U2;
+    ```
+
+$(H3 $(LNAME2 gen_cpp_header_files_func_decl, Function declarations))
+
+    $(P All function definitions must be declared as `extern (C)` or `extern (C++)`
+    to be taken into account. Function declarations, regardless of linkage, will
+    be ignored).
+
+    $(P The below D module)
+
+    ```D
+    int foo(int x)
+    {
+        return x * 42;
+    }
+
+    extern (C) int fun();
+    extern (C++) int fun2();
+
+    extern (C) int bar(int x)
+    {
+        return x * 42;
+    }
+
+    extern (C) static int bar2(int x)
+    {
+        return x * 42;
+    }
+
+    extern (C) private int bar3(int x)
+    {
+        return x * 42;
+    }
+
+    extern (C) int bar4(int x = 42)
+    {
+        return x * 42;
+    }
+
+    extern (C++) int baz(int x)
+    {
+        return x * 42;
+    }
+
+    extern (C++) static int baz2(int x)
+    {
+        return x * 42;
+    }
+
+    extern (C++) private int baz3(int x)
+    {
+        return x * 42;
+    }
+
+    extern (C++) int baz3(int x = 42)
+    {
+        return x * 42;
+    }
+    ```
+
+    $(P will generate the following declarations in the C++ header file)
+    ```C++
+    // ignoring variable dtoh_VarDeclaration.x because of linkage
+    // ignoring variable dtoh_VarDeclaration.y because of linkage
+    extern "C" _d_int z;
+    extern _d_int t;
+    struct S;
+    struct S2;
+    // ignoring non-cpp class C
+    class C2;
+    union U;
+    union U2;
+    ```
+
+$(H3 $(LNAME2 gen_cpp_header_files_enum_decl, Enum declarations))
+
+    $(P Enum declarations will be C++98 compatible, by default. This means
+    that the following D module)
+    ```D
+    enum X : byte
+    {
+        y, z
+    }
+    ```
+
+    $(P will generate the following declarations in the C++ header file)
+    ```C++
+    typedef _d_byte X;
+    enum
+    {
+        Xy = 0,
+        Xz = 1
+    };
+    ```
+
+    $(P to trigger the use of C++ enum classes, a C++ 11 or greater must
+    be requested through the use of the `-extern-std=c++11` flag. This will
+    generate)
+    ```C++
+    enum X : byte
+    {
+        y = 0,
+        z = 1
+    };
+    ```
+
+$(H3 $(LNAME2 gen_cpp_header_files_alias_decl, Alias declarations))
+
+    $(P Alias declarations will follow the following pattern. From the
+    D module)
+    ```D
+    alias T = int;
+
+    extern (C) int x;
+
+    alias u = x;
+
+    extern (C) int foo(int x)
+    {
+        return x * 42;
+    }
+
+    alias fun = foo;
+
+    extern (C++) int foo2(int x)
+    {
+        return x * 42;
+    }
+
+    alias fun2 = foo2;
+
+    extern (C) struct S;
+
+    alias aliasS = S;
+
+    extern (C++) struct S2;
+
+    alias aliasS2 = S2;
+
+    extern (C) class C;
+
+    alias aliasC = C;
+
+    extern (C++) class C2;
+
+    alias aliasC2 = C2;
+    ```
+
+    $(P the following C++ header file will be generated)
+    ```C++
+    struct S;
+    struct S2;
+    class C;
+    class C2;
+    typedef _d_int T;
+
+    extern "C" _d_int x;
+
+    // ignored variable dtoh_AliasDeclaration.x
+    extern "C" _d_int foo(_d_int x);
+
+    // ignored function dtoh_AliasDeclaration.foo
+    extern _d_int foo2(_d_int x);
+
+    // ignored function dtoh_AliasDeclaration.foo2
+    struct S;
+
+    typedef S aliasS;
+
+    struct S2;
+
+    typedef S2 aliasS2;
+
+    // ignoring non-cpp class C
+    typedef C* aliasC;
+
+    class C2;
+
+    typedef C2* aliasC2;
+    ```
+
+$(H3 $(LNAME2 gen_cpp_header_files_struct_decl, Struct declarations))
+
+    $(P All struct definitions must be declared as `extern (C)` or `extern (C++)`
+    to be taken into account. The following rules are applied when generating struct
+    definitions:)
+    $(UL
+    $(LI A default ctor will always be generated, unless the D struct has explicitly
+    `@disable`d the default ctor. This is done because D structs have a default ctor
+    defined that initialises the fields with known compile-time default values. The
+    generated C++ ctor uses `member initializer list` syntax.)
+    $(LI A known limitation of the language that users should note is that you can
+    call a default ctor of a D struct from C++ code, but you can't do the other way
+    around.)
+    $(LI If the D struct defines a dtor, a dtor declaration will be generated in the
+    C++ header struct definition. The linker will take care of the rest, ensuring
+    D and C++ objects link correctly.)
+    $(LI If the D struct defines a copy ctor, a copy ctor declaration will be generated
+    in the C++ header struct definition. The linker will take care of the rest, ensuring
+    D and C++ objects link correctly. Please take note about this known DMD mangling
+    issue regarding copy constructors: https://issues.dlang.org/show_bug.cgi?id=20208)
+    $(LI Alignment is supported only at struct definition level. Adding an `align(n):`
+    declaration inside the struct definition is currently broken.)
+    $(LI Another known limitation is that, for now, access specifiers are ignored. This
+    means that all the declarations are public in the generated header.)
+    )
+
+    $(P As an example, the following D module)
+
+    ```D
+    extern (C++) align(1) struct Aligned
+    {
+        byte a;
+        int b;
+        long c;
+
+        this(int a) {}
+        this(const ref Aligned rhs) {}
+        ~this() {}
+    }
+    ```
+
+    $(P will generate the following C++ header)
+    ```C++
+    struct
+    #if defined(__GNUC__) || defined(__clang__)
+        __attribute__((packed, aligned(1)))
+    #elif defined(_MSC_VER)
+        __declspec(align(1))
+    #elif defined(__DMC__)
+        #pragma pack(push, 1)
+    #endif
+    Aligned
+    {
+        _d_byte a;
+        _d_int b;
+        _d_long c;
+        Aligned(_d_int a);
+        Aligned() : a(), b(), c() {}
+        Aligned(const Aligned& rhs);
+        ~Aligned();
+    };
+    #if defined(__DMC__)
+        #pragma pack(pop)
+    #endif
+    ```
+
+
 $(H2 $(LNAME2 executable, Building Executables))
 
     $(P $(B dmd) can build an executable much faster if as many of the
